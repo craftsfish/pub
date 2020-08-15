@@ -1,8 +1,9 @@
-# Devfreq框架简介
+# Devfreq框架
 
-# 背景
+# 简介
 如何减少系统功耗，一直以来是计算机领域的研究热点。针对这一问题，硬件厂商推出了各种DVFS(Dynamic Voltage/Frequency Scaling)设备。这类设备功能可以根据负载动态调整工作电压和频率，提高系统能效。由于设备功能类似，统一的框架可以有效的规范代码结构，提高代码复用。在这样的背景下，Devfreq机制应运而生，旨在为linux支持的DVFS设备提供一套通用的框架和接口。\
-为了实现动态调整电压/频率的目标，必须周期性的测量和评估设备的负载情况，然后动态的对设备进行调整。对于不同的设备，调整电压/频率的策略可能大相径庭。因此Devfreq采用了类似cpu governer的机制，具体的调整策略由devfreq_governor负责。与此同时，通过引入struct devfreq_dev_profile结构统一对具体设备的描述，devfreq能够以一致的方式管理和操作这些设备。这样的设计在提高代码复用的同时提供了最大程度的灵活性，有效实现了对DVFS设备的支持。
+为了实现动态调整电压/频率的目标，必须周期性的测量和评估设备的负载情况，然后动态的对设备进行调整。对于不同的设备，调整电压/频率的策略可能大相径庭。因此Devfreq采用了类似cpu governer的机制，具体的调整策略由devfreq_governor负责。与此同时，通过引入struct devfreq_dev_profile结构统一对具体设备的描述，devfreq能够以一致的方式管理和操作这些设备。这样的设计在提高代码复用的同时提供了最大程度的灵活性，有效实现了对DVFS设备的支持。Devfreq框架与系统中其他模块的关系如下:\
+![framework](./images/devfreq/framework.png "framework.png")
 
 # struct devfreq_dev_profile
 struct devfreq_dev_profile描述具体的硬件设备，相当于Devfreq框架与具体设备之间的接口协议。该结构定义在include/linux/devfreq.h，一般由设备驱动的probe函数(比如exynos_bus_probe)负责构造并传递给devfreq框架。
