@@ -2,7 +2,10 @@
 
 # 简介
 如何减少系统功耗，一直以来是计算机领域的研究热点。针对这一问题，硬件厂商推出了各种DVFS(Dynamic Voltage/Frequency Scaling)设备。这类设备功能可以根据负载动态调整工作电压和频率，提高系统能效。由于设备功能类似，统一的框架可以有效的规范代码结构，提高代码复用。在这样的背景下，Devfreq机制应运而生，旨在为linux支持的DVFS设备提供一套通用的框架和接口。\
-为了实现动态调整电压/频率的目标，必须周期性的测量和评估设备的负载情况，然后动态的对设备进行调整。对于不同的设备，调整电压/频率的策略可能大相径庭。因此Devfreq采用了类似cpu governer的机制，具体的调整策略由devfreq_governor负责。与此同时，通过引入struct devfreq_dev_profile结构统一对具体设备的描述，devfreq能够以一致的方式管理和操作这些设备。这样的设计在提高代码复用的同时提供了最大程度的灵活性，有效实现了对DVFS设备的支持。Devfreq框架与系统中其他模块的关系如下:\
+为了实现动态调整电压/频率的目标，必须周期性的测量和评估设备的负载情况，然后动态的对设备进行调整。对于不同的设备，调整电压/频率的策略可能大相径庭。因此Devfreq采用了类似cpu governer的机制，具体的调整策略由devfreq_governor负责。与此同时，通过引入struct devfreq_dev_profile结构统一对具体设备的描述，devfreq能够以一致的方式管理和操作这些设备。这样的设计在提高代码复用的同时提供了最大程度的灵活性，有效实现了对DVFS设备的支持。\
+Devfreq与设备驱动，电源管理有着密切的联系。一般来说，设备驱动在probe接口中创建devfreq设备。devfreq设备在创建的过程中监听设备本身的pm_qos消息，确保电源管理系统对设备的调整能够及时传递到devfreq设备。此外，devfreq设备还通过sysfs接口给用户空间提供了操作管理这类设备的手段。对于希望监听devfreq设备消息的模块，notifier机制的引入实现了这一功能。\
+Devfreq框架与系统中其他模块的关系如下:\
+
 ![framework](./images/devfreq/framework.png "framework.png")
 
 # struct devfreq_dev_profile
@@ -69,9 +72,54 @@ devfreq_add_device函数的主要步骤如下:
 10. 将devfreq添加到全局的devfreq_list列表中
 
 # devfreq_monitor机制
-devfreq设备需要周期性的评估设备工作状态并调整频率，因此devfreq框架基于workqueue设计了一组通用函数，用于实现该功能。该功能可以通过设置governor->interrupt_driven来屏蔽。
+devfreq设备需要周期性的评估设备工作状态并调整频率，因此devfreq框架基于workqueue设计了一组通用函数，用于实现该功能。该功能可以通过设置governor->interrupt_driven来屏蔽。governer也可以实现自己的监控机制。一个名为devfreq_wq的专用workqueue在系统初始化时由devfreq_init函数创建。
+
 * devfreq_monitor_start: 启动设备负载监测，调用queue_delayed_work向devfreq_wq添加一个延迟devfreq->profile->polling_ms的work
 * devfreq_monitor: 负责周期性的评估负载并更新设备并重新向devfreq_wq添加一个新的work。这样就确保了devfreq_monitor函数的周期性调用
 * devfreq_monitor_stop: 停止设备负载监测
 * devfreq_monitor_suspend: 暂停负载监测并调用devfreq_update_status更新统计信息
 * devfreq_monitor_resume: 恢复负载监测并调用devfreq_update_status更新统计信息
+
+# sysfs接口
+devfreq框架引入了一个新的class类型devfreq_class。模块初始化时，调用class_create函数在/sys/class目录下增加了devfreq目录。devfreq_class定义了一组通用属性，添加devfreq设备时，对应的sysfs文件目录下会创建相应的文件接口，供用户空间查看/操作devfreq设备。每个文件读写的功能如下表:
+
+名称                         读                              写
+----                         ----                            ----
+name                         设备名称                        NA
+governor                     当前governor名称                修改governor
+available_governors          可选的governor名称              NA
+available_frequencies        可设置的设备频率                NA
+cur_freq                     当前设备频率                    NA
+target_freq                  最近一次设置时的请求频率        NA
+polling_interval             负载监测周期，以ms为单位        通知governor监测周期变更
+min_freq                     设备允许的最小频率              更新devfreq模块对设备最小频率的约束
+max_freq                     设备允许的最大频率              更新devfreq模块对设备最大频率的约束
+trans_stat                   列出设备频率调整的统计信息      重置统计信息
+
+上表中的target_freq必须是available_frequencies中的一种，devfreq计算trans_stat数据时也是以此为准。cur_freq则未必等同于target_freq，取决于具体的硬件能否配置成target_freq。\
+对polling_interval文件的写入并不直接修改polling_interval，而是通过governor的event_handler接口进行通知。governor在收到该请求并决策后调用devfreq_interval_update函数实际更新监测周期。\
+对于min(max)_freq的写入，devfreq框架需要与PM QoS模块合作。参考[devfreq设备的创建](# devfreq设备的创建)，更新保存在devfreq->user_min(max)_freq_req结构中的约束信息并通知PM QoS模块。由于我们在devfreq设备创建的时候监听了PM QoS的变更消息，对于min(max)_freq的写入会间接的更新设备频率。读取的时候devfreq也会读取PM QoS对于设备频率的总体约束并返回结果。\
+读取trans_stat会详细列出设备从频率A迁移到频率B的次数，各频率的持续时间，以及总的迁移次数。*所在行表示当前频率。这里列出了一个具体设备的trans_stat信息:
+
+```
+     From  :   To
+           :      2288      4577      7110      9155     12298     14236     16265   time(ms)
+*      2288:         0         0         0     41462         0         0         0  42535428
+       4577:         0         0         0         0         0         0         0         0
+       7110:         0         0         0         0         0         0         0         0
+       9155:     41463         0         0         0         0         0         0   8900392
+      12298:         0         0         0         0         0         0         0         0
+      14236:         0         0         0         0         0         0         0         0
+      16265:         0         0         0         1         0         0         0     60856
+Total transition : 82926
+
+```
+
+# debugfs接口
+TODO
+
+# governor的注册与查找
+
+# notifier
+
+# 附录1: 函数参考
