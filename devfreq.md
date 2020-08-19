@@ -1,8 +1,8 @@
 # Devfreq框架
 
 # 简介
-如何减少系统功耗，一直以来是计算机领域的研究热点。针对这一问题，硬件厂商推出了各种DVFS(Dynamic Voltage/Frequency Scaling)设备。这类设备可以根据负载动态调整工作电压和频率，提高系统能效。在这样的背景下，内核需要一套完整的方案来测量和评估设备负载并及时调整其工作频率。Devfreq框架正是为了解决这一问题而产生。\
-为了达成这一目标，devfreq框架通过设备驱动模型获取设备相关信息并对这些设备进行管理。对于不同设备，调频策略存在很大的差异，类似cpu governer的插件机制被引入以解决该问题。最后devfreq通过sysfs，debugfs向用户空间提供了操作和管理这些设备的手段。\
+如何减少系统功耗，一直以来是计算机领域的研究热点。针对这一问题，硬件厂商推出了各种DVFS(Dynamic Voltage/Frequency Scaling)设备。这类设备可以根据需求动态调整工作电压和频率，提高系统能效。在这样的背景下，内核需要一套完整的方案来评测设备负载并及时调整其工作频率。Devfreq框架正是为了解决这一问题而产生。\
+为了达成这一目标，devfreq框架通过设备驱动模型获取设备相关信息并对这些设备进行管理。不同设备的调频策略存在很大差异，类似cpu governer的插件机制被引入以解决该问题。最后devfreq通过sysfs，debugfs向用户空间提供了操作和管理这些设备的手段。\
 devfreq框架的设计模型如下:\
 
 ![framework](./images/devfreq/framework.png "framework.png")\
@@ -10,19 +10,18 @@ devfreq框架的设计模型如下:\
 
 # 设备描述
 ## struct devfreq_dev_profile
-具体的硬件设备如何控制，一般由配套的驱动代码实现，这些驱动千差万别。为了能够以一致的方式管理和操作这些设备，devfreq采用了类似于反向以来的方式定义了struct devfreq_dev_profile结构，用于描述具体的硬件设备。该结构定义在include/linux/devfreq.h，规范了Devfreq框架与具体设备之间的接口协议，一般由设备驱动的probe函数(比如exynos_bus_probe)负责构造并传递给devfreq框架。
+具体的硬件设备如何控制，一般由配套的驱动代码实现，这些驱动千差万别。为了能够以一致的方式管理和操控这些设备，devfreq采用了类似于反向依赖的方式定义了struct devfreq_dev_profile结构，用于描述具体的硬件设备。该结构定义在include/linux/devfreq.h，规范了devfreq框架与具体设备之间的接口协议，一般由设备驱动的probe函数(比如exynos_bus_probe)负责构造并传递给devfreq框架。
 
 类型                                                            名称            说明
 ----                                                            ----            ----
 unsigned long                                                   initial_freq    用于在devfreq_add_device函数执行时初始化频率信息
 unsigned int                                                    polling_ms      评估设备状态的时间周期
-int (*)(struct device *dev, unsigned long *freq, u32 flags)     target          设置设备频率，由具体的设备提供该接口
-int (*)(struct device *dev, struct devfreq_dev_status *stat)    get_dev_status  获取设备自上次测量后的运行信息，由governor通过devfreq_update_stats函数间接调用，主要用于governor评估设备负载，决定目标频率
+int (*)(struct device *dev, unsigned long *freq, u32 flags)     target          设置设备频率，由具体的设备驱动提供该接口
+int (*)(struct device *dev, struct devfreq_dev_status *stat)    get_dev_status  获取设备自上次评测后的运行信息，由governor通过devfreq_update_stats函数间接调用，主要用于governor评估设备负载，决定目标频率
 int (*)(struct device *dev, unsigned long *freq)                get_cur_freq    获取当前频率
-void (*)(struct device *dev)                                    exit            用于在devfreq设备注销时，通知底层设备
+void (*)(struct device *dev)                                    exit            用于在devfreq设备注销时，通知设备驱动
 unsigned long *                                                 freq_table      存储了设备支持的工作频率，这些信息在devfreq设备注册时通过OPP(Operating Performance Points)框架提供的接口查询获得。
 unsigned int                                                    max_state       用于表示上述freq_table结构中存储的频率个数
-
 
 ## struct devfreq
 Devfreq框架内部通过struct devfreq结构描述一个具体的devfreq设备，该结构同样定义在include/linux/devfreq.h。
@@ -30,7 +29,7 @@ Devfreq框架内部通过struct devfreq结构描述一个具体的devfreq设备�
 类型                               名称                 说明
 ----                               ----                 ----
 struct device                      dev                  devfreq设备的struct device实例
-struct devfreq_dev_profile *       profile              devfreq设备操控的底层设备抽象
+struct devfreq_dev_profile *       profile              devfreq设备操控的底层设备
 const struct devfreq_governor *    governor             当前governor
 char [DEVFREQ_NAME_LEN]            governor_name        governor名称
 struct notifier_block              nb                   用于监控OPP消息
