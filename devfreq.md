@@ -52,9 +52,9 @@ struct notifier_block              nb_max
 
 # devfreq与驱动模型
 ## devfreq设备的创建
-devfreq设备的创建由devfreq_add_device函数实现，该函数使用如下参数:
+devfreq设备的创建由驱动调用devfreq_add_device函数实现，该函数使用如下参数:
 
-* dev: 需要增加devfreq功能的设备
+* dev: 需要添加devfreq功能的设备
 * profile: 用于支持devfreq框架的profile结构，由设备提供
 * governor_name: governer名称
 * data: governor使用的扩展参数，devfreq框架不直接使用
@@ -67,16 +67,44 @@ devfreq_add_device函数的主要步骤如下:
 4. 调用find_available_min(max)_freq获取设备支持的最小(最大)工作频率并保存到devfreq->scaling_min(max)_freq
 5. 通过device_register将devfreq->dev注册到驱动设备框架
 6. 初始化devfreq->stats，用于存储相关的统计信息，包括在每个状态的存续时间，状态迁移的次数等
-7. 调用dev_pm_qos_add_request增加对dev工作频率的约束，最小值设为0，最大值设置为PM_QOS_MAX_FREQUENCY_DEFAULT_VALUE。约束信息保存在devfreq->user_min(max)_freq_req，用户空间可以通过sysfs写入max/min_freq修改这些信息。改动通过dev_pm_qos_update_request接口应用到PM框架。
-8. 通过dev_pm_qos_add_notifier注册监听函数，监测其他模块对于dev工作频率的约束，收到通知后调用update_devfreq更新设备频率。
-9. 根据governor_name找到合适的governor并通知governor启动，如果没有找到对应的governor则返回相应的错误值。
+7. 调用dev_pm_qos_add_request增加对dev工作频率的约束，约束信息保存在devfreq->user_min(max)_freq_req
+8. 通过dev_pm_qos_add_notifier注册监听函数，监测其他模块对于dev工作频率的约束
+9. 根据governor_name找到合适的governor并通知governor启动，如果没有找到对应的governor则返回相应的错误值
 10. 将devfreq添加到全局的devfreq_list列表中
 
 ## PM QoS & OPP
+devfreq框架对设备频率的约束同时受到PM QoS和OPP的影响。OPP决定了设备能够工作的频段，而PM QoS则可能对同一设备添加多个频率约束。\
+devfreq框架与OPP模块的协作包括:
+
+* devfreq设备初始化时通过OPP获取设备的工作频率信息
+* 提供devfreq_recommended_opp接口，用于根据频率推荐合适的OPP
+* _(un)register_opp_notifier接口，用于确保devfreq框架在OPP发生变动时得到通知消息
+	* devfreq_register_opp_notifier
+	* devfreq_unregister_opp_notifier
+	* devm_devfreq_register_opp_notifier
+	* devm_devfreq_unregister_opp_notifier
+
+devfreq框架与PM QoS协作，约束设备运行频率。在PM QoS框架下，对设备的频率约束可以存在多个实例，PM QoS负责整合这些约束。一方面，devfreq通过struct devfreq结构维护了自己的一套频率约束。初始越是为0到PM_QOS_MAX_FREQUENCY_DEFAULT_VALUE。后续可以由用户空间通过sysfs调整，这些调整由devfreq框架调用dev_pm_qos_update_request接口应用到PM QoS。另一方面，devfreq通过过dev_pm_qos_add_notifier监听系统其他部分对设备的频率约束。一旦侦测到频率约束变化，devfreq调用update_devfreq更新设备频率。
 
 # governor
 ## struct devfreq_governor
-## 注册&注销
+类型                                                                名称                 说明
+----                                                                ----                 ----
+struct list_head                                                    node                 governor的头节点，用于维护devfreq_governor_list
+const char [DEVFREQ_NAME_LEN]                                       name                 governor名称
+const unsigned int                                                  immutable            governor是否可更改
+const unsigned int                                                  interrupt_driven     使用governor特有的评测机制
+int (*)(struct devfreq *this, unsigned long *freq)                  get_target_freq      回调函数，devfreq通过该接口获取目标频率
+int (*)(struct devfreq *devfreq, unsigned int event, void *data)    event_handler        回调函数，devfreq通过该接口将相关事件发送给governor
+
+## 主要接口
+名称                         说明
+----                         ----
+devfreq_add_governor         注册governor
+devfreq_remove_governor      注销governor
+find_devfreq_governor        查找governor
+try_then_request_governor    查找governor，如果需要加载相应的governor模块
+
 ## devfreq_monitor机制
 devfreq设备需要周期性的评估设备工作状态并调整频率，因此devfreq框架基于workqueue设计了一组通用函数，用于实现该功能。该功能可以通过设置governor->interrupt_driven来屏蔽。governer也可以实现自己的监控机制。一个名为devfreq_wq的专用workqueue在系统初始化时由devfreq_init函数创建。
 
@@ -86,8 +114,7 @@ devfreq设备需要周期性的评估设备工作状态并调整频率，因此d
 * devfreq_monitor_suspend: 暂停负载监测并调用devfreq_update_status更新统计信息
 * devfreq_monitor_resume: 恢复负载监测并调用devfreq_update_status更新统计信息
 
-# devfreq与用户空间
-## sysfs
+# sysfs
 devfreq框架引入了一个新的class类型devfreq_class。模块初始化时，调用class_create函数在/sys/class目录下增加了devfreq目录。devfreq_class定义了一组通用属性，添加devfreq设备时，对应的sysfs文件目录下会创建相应的文件接口，供用户空间查看/操作devfreq设备。每个文件读写的功能如下表:
 
 名称                         读                              写
@@ -122,133 +149,11 @@ Total transition : 82926
 
 ```
 
-# debugfs接口
-TODO
-
 # 其他
-## notifier
-由于设备功能类似，统一的框架可以有效的规范代码结构，提高代码复用。在这样的背景下，Devfreq机制应运而生，旨在为linux支持的DVFS设备提供一套通用的框架和接口。\
-为了动态调整频率，必须周期性的测量和评估设备的负载情况，然后对设备进行调整。对于不同的设备，调整电压/频率的策略可能大相径庭。因此Devfreq采用了类似cpu governer的机制，具体的调整策略由devfreq_governor负责。与此同时，通过引入struct devfreq_dev_profile结构统一对具体设备的描述，devfreq能够以一致的方式管理和操作这些设备。这样的设计在提高代码复用的同时提供了最大程度的灵活性，有效实现了对DVFS设备的支持。
-Devfreq与设备驱动，电源管理有着密切的联系。一般来说，设备驱动在probe接口中创建devfreq设备。devfreq设备对频率的具体调整需要整合PM QoS以及OPP模块对于设备的管控。对于PM QoS消息，devfreq设备在创建的过程中会主动监听并做相应的处理。针对OPP，则由驱动根据需要决策，devfreq框架提供了相应的接口注册监听并处理。此外，devfreq设备还通过sysfs接口给用户空间提供了操作管理这类设备的手段。对于希望监听devfreq设备消息的模块，devfreq框架同样提供了notifier机制。
 
-# 附录
-## 附录1: 函数说明
-```
-static struct devfreq *find_device_devfreq(struct device *dev)
-static unsigned long find_available_min_freq(struct devfreq *devfreq)
-static unsigned long find_available_max_freq(struct devfreq *devfreq)
-static void get_freq_range(struct devfreq *devfreq,
-			   unsigned long *min_freq,
-			   unsigned long *max_freq)
-static int devfreq_get_freq_level(struct devfreq *devfreq, unsigned long freq)
-static int set_freq_table(struct devfreq *devfreq)
-int devfreq_update_status(struct devfreq *devfreq, unsigned long freq)
-static struct devfreq_governor *find_devfreq_governor(const char *name)
-static struct devfreq_governor *try_then_request_governor(const char *name)
-static int devfreq_notify_transition(struct devfreq *devfreq,
-		struct devfreq_freqs *freqs, unsigned int state)
-static int devfreq_set_target(struct devfreq *devfreq, unsigned long new_freq,
-			      u32 flags)
-int update_devfreq(struct devfreq *devfreq)
-static void devfreq_monitor(struct work_struct *work)
-void devfreq_monitor_start(struct devfreq *devfreq)
-void devfreq_monitor_stop(struct devfreq *devfreq)
-void devfreq_monitor_suspend(struct devfreq *devfreq)
-void devfreq_monitor_resume(struct devfreq *devfreq)
-void devfreq_interval_update(struct devfreq *devfreq, unsigned int *delay)
-static int devfreq_notifier_call(struct notifier_block *nb, unsigned long type,
-				 void *devp)
-static int qos_notifier_call(struct devfreq *devfreq)
-static int qos_min_notifier_call(struct notifier_block *nb,
-					 unsigned long val, void *ptr)
-static int qos_max_notifier_call(struct notifier_block *nb,
-					 unsigned long val, void *ptr)
-static void devfreq_dev_release(struct device *dev)
-struct devfreq *devfreq_add_device(struct device *dev,
-				   struct devfreq_dev_profile *profile,
-				   const char *governor_name,
-				   void *data)
-int devfreq_remove_device(struct devfreq *devfreq)
-static int devm_devfreq_dev_match(struct device *dev, void *res, void *data)
-static void devm_devfreq_dev_release(struct device *dev, void *res)
-struct devfreq *devm_devfreq_add_device(struct device *dev,
-					struct devfreq_dev_profile *profile,
-					const char *governor_name,
-					void *data)
-struct devfreq *devfreq_get_devfreq_by_phandle(struct device *dev, int index)
-void devm_devfreq_remove_device(struct device *dev, struct devfreq *devfreq)
-int devfreq_suspend_device(struct devfreq *devfreq)
-int devfreq_resume_device(struct devfreq *devfreq)
-void devfreq_suspend(void)
-void devfreq_resume(void)
-int devfreq_add_governor(struct devfreq_governor *governor)
-int devfreq_remove_governor(struct devfreq_governor *governor)
-static ssize_t name_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-static ssize_t governor_show(struct device *dev,
-			     struct device_attribute *attr, char *buf)
-static ssize_t governor_store(struct device *dev, struct device_attribute *attr,
-			      const char *buf, size_t count)
-static ssize_t available_governors_show(struct device *d,
-					struct device_attribute *attr,
-					char *buf)
-static ssize_t cur_freq_show(struct device *dev, struct device_attribute *attr,
-			     char *buf)
-static ssize_t target_freq_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-static ssize_t polling_interval_show(struct device *dev,
-				     struct device_attribute *attr, char *buf)
-static ssize_t polling_interval_store(struct device *dev,
-				      struct device_attribute *attr,
-				      const char *buf, size_t count)
-static ssize_t min_freq_store(struct device *dev, struct device_attribute *attr,
-			      const char *buf, size_t count)
-static ssize_t min_freq_show(struct device *dev, struct device_attribute *attr,
-			     char *buf)
-static ssize_t max_freq_store(struct device *dev, struct device_attribute *attr,
-			      const char *buf, size_t count)
-static ssize_t max_freq_show(struct device *dev, struct device_attribute *attr,
-			     char *buf)
-static ssize_t available_frequencies_show(struct device *d,
-					  struct device_attribute *attr,
-					  char *buf)
-static ssize_t trans_stat_show(struct device *dev,
-			       struct device_attribute *attr, char *buf)
-static ssize_t trans_stat_store(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-static int devfreq_summary_show(struct seq_file *s, void *data)
-static int __init devfreq_init(void)
-struct dev_pm_opp *devfreq_recommended_opp(struct device *dev,
-					   unsigned long *freq,
-					   u32 flags)
-int devfreq_register_opp_notifier(struct device *dev, struct devfreq *devfreq)
-int devfreq_unregister_opp_notifier(struct device *dev, struct devfreq *devfreq)
-static void devm_devfreq_opp_release(struct device *dev, void *res)
-int devm_devfreq_register_opp_notifier(struct device *dev,
-				       struct devfreq *devfreq)
-void devm_devfreq_unregister_opp_notifier(struct device *dev,
-					 struct devfreq *devfreq)
-int devfreq_register_notifier(struct devfreq *devfreq,
-			      struct notifier_block *nb,
-			      unsigned int list)
-int devfreq_unregister_notifier(struct devfreq *devfreq,
-				struct notifier_block *nb,
-				unsigned int list)
-static void devm_devfreq_notifier_release(struct device *dev, void *res)
-int devm_devfreq_register_notifier(struct device *dev,
-				struct devfreq *devfreq,
-				struct notifier_block *nb,
-				unsigned int list)
-void devm_devfreq_unregister_notifier(struct device *dev,
-				      struct devfreq *devfreq,
-				      struct notifier_block *nb,
-				      unsigned int list)
-```
-
-## 附录2：术语表
+# 附录：术语表
 名称     说明
 ----     ----
 DVFS
 OPP
-PM QoS
+PM QoS    
