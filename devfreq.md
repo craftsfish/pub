@@ -35,17 +35,17 @@ char [DEVFREQ_NAME_LEN]            governor_name        governor名称
 struct notifier_block              nb                   用于监控OPP消息
 struct delayed_work                work                 monitor使用该结构执行周期性任务
 unsigned long                      previous_freq        最近一次设置的设备频率，与devfreq_dev_profile结构中的freq_table对齐
-struct devfreq_dev_status          last_status
+struct devfreq_dev_status          last_status          设备的最新状态
 void *                             data                 governor使用的扩展参数，devfreq框架不直接使用
 struct dev_pm_qos_request          user_min_freq_req    devfreq框架对最小频率的约束    
 struct dev_pm_qos_request          user_max_freq_req    devfreq框架对最大频率的约束
 unsigned long                      scaling_min_freq     设备允许的最小工作频率，综合了PM QoS以及OPP对设备的频率约束
 unsigned long                      scaling_max_freq     设备允许的最大工作频率，综合了PM QoS以及OPP对设备的频率约束
-bool                               stop_polling
-unsigned long                      suspend_freq
-unsigned long                      resume_freq
-atomic_t                           suspend_count
-struct devfreq_stats               stats
+bool                               stop_polling         monitor状态
+unsigned long                      suspend_freq         设备以固定频率suspend
+unsigned long                      resume_freq          保存设备resume时需要恢复的频率
+atomic_t                           suspend_count        suspend次数
+struct devfreq_stats               stats                设备运行的统计信息
 struct srcu_notifier_head          transition_notifier_list
 struct notifier_block              nb_min
 struct notifier_block              nb_max
