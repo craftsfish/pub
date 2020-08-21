@@ -1,6 +1,6 @@
 # Devfreq框架
 
-# 1. 简介
+# 1. 引言
 如何减少系统功耗，一直以来是计算机领域的研究热点。针对这一问题，硬件厂商推出了各种DVFS(Dynamic Voltage/Frequency Scaling)设备。这类设备可以根据需求动态调整工作电压和频率，提高系统能效。在这样的背景下，内核需要一套完整的方案来评测设备负载并及时调整其工作频率。Devfreq框架正是为了解决这一问题而产生。
 为了达成这一目标，devfreq框架通过设备驱动模型获取设备信息并对这些设备进行管理。不同设备的调频策略存在很大差异，类似cpu governer的插件机制被引入以解决该问题。最后devfreq通过sysfs，debugfs向用户空间提供了操作和管理这些设备的手段。\
 
@@ -134,7 +134,7 @@ trans_stat                   列出设备频率调整的统计信息      重置
 
 上表中的target_freq必须是available_frequencies中的一种，实质上就是struct devfreq结构中的previous_freq。devfreq计算trans_stat数据时也是以此为准。cur_freq则未必等同于target_freq，取决于具体的硬件能否配置成target_freq。
 对polling_interval文件的写入并不直接修改struct devfreq_dev_profile结构中的polling_ms，而是通过governor的event_handler接口进行通知。governor在收到该请求并决策后调用devfreq_interval_update函数更新监测周期。
-对于min(max)_freq的写入，devfreq框架需要与PM QoS模块合作。参考[devfreq设备的创建](# devfreq设备的创建)，更新保存在struct devfreq结构的user_min(max)_freq_req变量中并通知PM QoS模块。由于我们在devfreq设备创建的时候监听了PM QoS的变更消息，对于min(max)_freq的写入会间接的更新设备频率。读取的时候devfreq也会综合PM QoS和OPP对于设备频率的总体约束并返回结果。
+对于min(max)_freq的写入，devfreq框架需要与PM QoS模块合作。参考[devfreq设备的创建](#devfreq设备的创建)，更新保存在struct devfreq结构的user_min(max)_freq_req变量中并通知PM QoS模块。由于我们在devfreq设备创建的时候监听了PM QoS的变更消息，对于min(max)_freq的写入会间接的更新设备频率。读取的时候devfreq也会综合PM QoS和OPP对于设备频率的总体约束并返回结果。
 读取trans_stat会详细列出设备从频率A迁移到频率B的次数，各频率的持续时间，以及总的迁移次数。*所在行表示当前频率。这里列出了一个具体设备的trans_stat信息:
 
 ```
@@ -160,4 +160,5 @@ OPP       Operating Performance Points or P-states
 PM QoS    Power Manager Quality of Service
 
 ## 附录2：源码
-Linux 5.6-rc6，commit fb33c6510d5595144d585aa194d377cf74d31911
+Linux 5.6-rc6，commit: fb33c6510d5595144d585aa194d377cf74d31911
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
